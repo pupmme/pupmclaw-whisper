@@ -1,3 +1,4 @@
+import asyncio
 import importlib.metadata
 import os
 from os import path
@@ -14,6 +15,8 @@ from whisper import tokenizer
 
 from app.config import CONFIG
 from app.factory.asr_model_factory import ASRModelFactory
+import io as _io
+
 from app.utils import load_audio
 
 asr_model = ASRModelFactory.create_asr_model()
@@ -134,6 +137,9 @@ async def detect_language(
     }
 
 
+    return {"text": text}
+
+
 @click.command()
 @click.option(
     "-h",
@@ -156,3 +162,56 @@ def start(host: str, port: Optional[int] = None):
 
 if __name__ == "__main__":
     start()
+
+
+# ============ OpenAI 兼容端点（供 QQ/Telegram 等插件调用）==========
+@app.post("/v1/audio/transcriptions", tags=["OpenAI Compatible"])
+async def openai_transcriptions(
+    file: UploadFile = File(...),  # noqa: B008
+    model: Union[str, None] = Query(default=None),
+    language: Union[str, None] = Query(default=None),
+    prompt: Union[str, None] = Query(default=None),
+    response_format: Union[str, None] = Query(default="json"),
+    temperature: Union[float, None] = Query(default=None),
+):
+    """
+    OpenAI Audio Transcription API 兼容端点。
+    QQ/Telegram 等插件的 STT 模块可直连此端点，
+    无需修改插件源码，只需在 openclaw.json 中配置 baseUrl 即可。
+    """
+    try:
+        audio_data = load_audio(file.file, encode=True)
+    except Exception as e:
+        import traceback
+        raise RuntimeError(f"load_audio failed: {e}\n{traceback.format_exc()}") from None
+
+    try:
+        result_gen = await asyncio.to_thread(
+            asr_model.transcribe,
+            audio_data,
+            task="transcribe",
+            language=language,
+            initial_prompt=prompt,
+            vad_filter=False,
+            word_timestamps=False,
+            options=None,
+            output="txt",
+        )
+    except Exception as e:
+        import traceback
+        raise RuntimeError(f"transcribe failed: {e}\n{traceback.format_exc()}") from None
+
+    text_chunks = []
+    for chunk in result_gen:
+        if isinstance(chunk, bytes):
+            text_chunks.append(chunk.decode("utf-8"))
+        else:
+            text_chunks.append(str(chunk))
+    text = "".join(text_chunks).strip()
+
+    if response_format == "text":
+        return StreamingResponse(
+            _io.BytesIO(text.encode("utf-8")),
+            media_type="text/plain",
+        )
+    return {"text": text}
