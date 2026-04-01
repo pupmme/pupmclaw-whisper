@@ -10,6 +10,7 @@
 |------|------|------|------|
 | `start.py` | `poetry run whisper-asr-webservice` | 自定义 Python 启动器（新增） | 懒加载模型 + systemd 兼容 |
 | `app/factory/asr_model_factory.py` | `from app import *` | `sys.path.insert(0, "/home/openclaw/whisper-asr")` | 解决 import 路径问题 |
+| `app/webservice.py` | 上游原版 | 新增 `/v1/audio/transcriptions` 端点 | OpenAI 兼容接口，供 QQ 频道等插件直连 |
 | `app/config.py` | `torch` 全局 import | 保留（无修改） | — |
 | `openclaw-whisper-asr.service` | 无 | systemd 服务（新增） | 持久化运行 |
 | `cli-wrapper.sh` | 无 | OpenClaw CLI wrapper（新增） | OpenClaw 接入 |
@@ -108,7 +109,41 @@ sudo journalctl -u openclaw-whisper-asr -f
 
 ---
 
-## 🔧 接入 OpenClaw
+## 🔧 接入 OpenClaw（两种方式）
+
+### 方式 A：CLI Wrapper（框架 tools.media.audio，推荐）
+
+框架会自动调用 CLI 脚本，适合 Telegram 等通用场景。
+
+```json
+{
+  "tools": {
+    "media": {
+      "audio": {
+        "enabled": true,
+        "echoTranscript": false,
+        "language": "zh",
+        "models": [
+          {
+            "type": "cli",
+            "command": "/home/openclaw/whisper-asr/cli-wrapper.sh",
+            "args": ["{{MediaPath}}"],
+            "timeoutSeconds": 60
+          },
+          {
+            "provider": "openai",
+            "model": "gpt-4o-mini-transcribe"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+### 方式 B：OpenAI 兼容 HTTP（QQ 频道等插件直连）
+
+插件的 STT 模块直接 POST 到 Whisper ASR，无需 CLI wrapper。
 
 在 OpenClaw 的 `openclaw.json` 中加入：
 
@@ -148,6 +183,24 @@ sudo kill -HUP $(pgrep -f openclaw-gateway)
 curl http://127.0.0.1:18789/health
 ```
 
+### 方式 B 配置：QQ 频道插件直连
+
+```json
+{
+  "channels": {
+    "qqbot": {
+      "stt": {
+        "enabled": true,
+        "baseUrl": "http://127.0.0.1:9000",
+        "apiKey": "local-whisper-asr",
+        "provider": "openai",
+        "model": "small"
+      }
+    }
+  }
+}
+```
+
 ---
 
 ## 📁 目录结构
@@ -158,7 +211,7 @@ curl http://127.0.0.1:18789/health
 │   ├── asr_models/        ← 上游源码（未改动）
 │   ├── factory/           ← 上游源码（未改动）
 │   ├── config.py          ← 上游源码（未改动）
-│   └── webservice.py      ← 上游源码（未改动）
+│   └── webservice.py      ← 上游源码 + 本版新增 OpenAI 端点
 ├── cli-wrapper.sh         ← OpenClaw CLI wrapper（新增）
 ├── openclaw-whisper-asr.service  ← systemd 服务（新增）
 ├── start.py               ← 启动器（新增）
