@@ -1,0 +1,18 @@
+[Unit]
+Description=Whisper ASR Webservice (ahmetoner/whisper-asr-webservice, faster-whisper small)
+After=network.target
+
+[Service]
+Type=simple
+User=openclaw
+WorkingDirectory=/home/openclaw/whisper-asr
+ExecStart=/usr/bin/python3 /home/openclaw/whisper-asr/start.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+# 确保有完整环境
+Environment=PYTHONPATH=/home/openclaw/whisper-asr
+
+[Install]
+WantedBy=multi-user.target
